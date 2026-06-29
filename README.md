@@ -1,5 +1,9 @@
 # HomeProof
 
+<p align="center">
+  <img src="apps/mobile/assets/images/icon.png" width="200" alt="HomeProof Logo" />
+</p>
+
 HomeProof is a professional housing trust platform designed to help renters evaluate properties before signing a lease. By aggregating community intelligence, trust scores, and AI-assisted risk analysis, HomeProof provides unprecedented transparency into the rental market.
 
 ## Architecture
