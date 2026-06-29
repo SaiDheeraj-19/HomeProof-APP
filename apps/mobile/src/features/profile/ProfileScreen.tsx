@@ -1,19 +1,17 @@
-/**
- * ProfileScreen — Full user profile with stats, account info, and sign-out.
- * Fetches profile data from the `profiles` table and shows report + save counts.
- */
-import React, { useCallback, useState } from 'react';
+import React from 'react';
 import {
   View,
   ScrollView,
   StyleSheet,
   Pressable,
   Alert,
-  SafeAreaView,
+  Platform,
+  StatusBar,
 } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { useQuery } from '@tanstack/react-query';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../shared/services/supabase';
@@ -21,26 +19,26 @@ import { useAuth } from '../auth/AuthContext';
 import { useUserStore } from '../../store/useUserStore';
 import { useSavedStore } from '../../store/useSavedStore';
 import { Typography } from '../../shared/components/Typography';
-import { Card } from '../../shared/components/Card';
-import { SkeletonLoader } from '../../shared/components/SkeletonLoader';
-import { logger } from '../../shared/logger';
 import { haptics } from '../../shared/platform/haptics';
 
-// ─── Stat Card ───────────────────────────────────────────────────────────────
-interface StatCardProps {
-  emoji: string;
+// ─── Stat Box ───────────────────────────────────────────────────────────────
+interface StatBoxProps {
+  icon: keyof typeof Ionicons.glyphMap;
   value: number | string;
   label: string;
+  color: string;
 }
 
-function StatCard({ emoji, value, label }: StatCardProps) {
+function StatBox({ icon, value, label, color }: StatBoxProps) {
   return (
-    <View style={styles.statCard}>
-      <Typography style={styles.statEmoji}>{emoji}</Typography>
-      <Typography variant="h2" weight="bold" color="text-slate-900 dark:text-white">
+    <View style={styles.statBox}>
+      <View style={[styles.statIconWrap, { backgroundColor: `${color}15` }]}>
+        <Ionicons name={icon} size={22} color={color} />
+      </View>
+      <Typography variant="h3" weight="bold" color="text-white" style={{ marginTop: 8 }}>
         {value}
       </Typography>
-      <Typography variant="caption" color="text-slate-500">
+      <Typography variant="caption" color="text-slate-400">
         {label}
       </Typography>
     </View>
@@ -54,40 +52,48 @@ interface MenuItemProps {
   subtitle?: string;
   onPress?: () => void;
   destructive?: boolean;
+  isLast?: boolean;
+  color?: string;
 }
 
-function MenuItem({ icon, label, subtitle, onPress, destructive = false }: MenuItemProps) {
+function MenuItem({ icon, label, subtitle, onPress, destructive = false, isLast = false, color = '#3B82F6' }: MenuItemProps) {
   return (
     <Pressable
-      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={label}
+      style={({ pressed }) => [
+        styles.menuItemWrapper,
+        pressed && styles.menuItemPressed,
+      ]}
+      onPress={() => {
+        haptics.light();
+        onPress?.();
+      }}
     >
-      <View style={[styles.menuIconWrap, destructive && styles.menuIconDestructive]}>
-        <Ionicons
-          name={icon}
-          size={18}
-          color={destructive ? '#ef4444' : '#3B82F6'}
-        />
-      </View>
-      <View style={styles.menuTextGroup}>
-        <Typography
-          variant="body"
-          weight="medium"
-          color={destructive ? 'text-red-500' : 'text-slate-900 dark:text-white'}
-        >
-          {label}
-        </Typography>
-        {subtitle && (
-          <Typography variant="caption" color="text-slate-400">
-            {subtitle}
+      <View style={[styles.menuItem, isLast && { borderBottomWidth: 0 }]}>
+        <View style={[styles.menuIconWrap, destructive ? { backgroundColor: '#ef444415' } : { backgroundColor: `${color}15` }]}>
+          <Ionicons
+            name={icon}
+            size={18}
+            color={destructive ? '#ef4444' : color}
+          />
+        </View>
+        <View style={styles.menuTextGroup}>
+          <Typography
+            variant="body"
+            weight="medium"
+            color={destructive ? 'text-red-500' : 'text-slate-100'}
+          >
+            {label}
           </Typography>
+          {subtitle && (
+            <Typography variant="caption" color="text-slate-400">
+              {subtitle}
+            </Typography>
+          )}
+        </View>
+        {!destructive && (
+          <Ionicons name="chevron-forward" size={16} color="rgba(148,163,184,0.4)" />
         )}
       </View>
-      {!destructive && (
-        <Ionicons name="chevron-forward" size={16} color="rgba(148,163,184,0.6)" />
-      )}
     </Pressable>
   );
 }
@@ -95,55 +101,24 @@ function MenuItem({ icon, label, subtitle, onPress, destructive = false }: MenuI
 // ─── ProfileScreen ────────────────────────────────────────────────────────────
 export function ProfileScreen() {
   const { user, signOut } = useAuth();
-  const { profile, setProfile } = useUserStore();
+  const { profile } = useUserStore();
   const savedIds = useSavedStore((s) => s.savedIds);
+  const router = useRouter();
 
-  // Fetch / cache profile
-  const { isLoading: profileLoading } = useQuery({
-    queryKey: ['profile', user?.id],
-    queryFn: async () => {
-      if (!user?.id) throw new Error('No user');
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-      if (error && error.code !== 'PGRST116') throw error;
-      // Auto-create profile row if it doesn't exist yet
-      if (!data) {
-        const { data: created, error: insertErr } = await supabase
-          .from('profiles')
-          .insert({ id: user.id })
-          .select()
-          .single();
-        if (insertErr) throw insertErr;
-        setProfile(created);
-        return created;
-      }
-      setProfile(data);
-      return data;
-    },
-    enabled: !!user?.id,
-    retry: 1,
-  });
-
-  // Count reports filed by user
   const { data: reportCount = 0 } = useQuery({
-    queryKey: ['my_report_count', user?.id],
+    queryKey: ['reportCount', user?.id],
     queryFn: async () => {
       if (!user?.id) return 0;
-      const { count, error } = await supabase
+      const { count } = await supabase
         .from('reports')
-        .select('id', { count: 'exact', head: true })
+        .select('*', { count: 'exact', head: true })
         .eq('reporter_id', user.id);
-      if (error) throw error;
-      return count ?? 0;
+      return count || 0;
     },
     enabled: !!user?.id,
   });
 
-  const handleSignOut = useCallback(() => {
-    haptics.warning();
+  const handleSignOut = () => {
     Alert.alert(
       'Sign Out',
       'Are you sure you want to sign out?',
@@ -154,238 +129,282 @@ export function ProfileScreen() {
           style: 'destructive',
           onPress: async () => {
             haptics.medium();
-            try {
-              await signOut();
-              useUserStore.getState().clear();
-              useSavedStore.getState().clear();
-            } catch (err) {
-              logger.error('ProfileScreen', 'Sign out failed', err);
-            }
+            await signOut();
+            router.replace('/(auth)/login');
           },
         },
       ]
     );
-  }, [signOut]);
-
-  // Build avatar initials
-  const getInitials = () => {
-    if (profile?.first_name) {
-      return `${profile.first_name[0] ?? ''}${profile.last_name?.[0] ?? ''}`.toUpperCase();
-    }
-    return user?.email?.[0]?.toUpperCase() ?? '?';
   };
 
-  const router = useRouter();
-  const [tapCount, setTapCount] = useState(0);
-  const [lastTap, setLastTap] = useState(0);
-
-  const handleAvatarPress = () => {
-    const now = Date.now();
-    if (now - lastTap > 1000) {
-      setTapCount(1);
-    } else {
-      setTapCount(prev => prev + 1);
-      if (tapCount + 1 >= 5) {
-        setTapCount(0);
-        router.push('/diagnostics');
-      }
-    }
-    setLastTap(now);
+  const handleComingSoon = (feature: string) => {
+    Alert.alert(feature, 'This settings page is coming soon!');
   };
-
-  const displayName = profile?.first_name
-    ? `${profile.first_name} ${profile.last_name ?? ''}`.trim()
-    : user?.email ?? 'Anonymous';
-
-  const memberSince = user?.created_at
-    ? new Date(user.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-    : '—';
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      
+      {/* Immersive Header Gradient */}
+      <LinearGradient
+        colors={['#1E3A8A', '#0F172A']}
+        locations={[0, 1]}
+        style={styles.headerBackground}
+      />
+      <View style={styles.glowOrb} />
 
-        {/* Header gradient */}
-        <LinearGradient
-          colors={['#1E3A5F', '#0F172A']}
-          style={styles.headerGradient}
-        >
-          {/* Avatar */}
-          <Animated.View entering={FadeInDown.duration(600)} style={styles.avatarWrap}>
-            <Pressable onPress={handleAvatarPress}>
-              <LinearGradient colors={['#3B82F6', '#2563EB']} style={styles.avatar}>
-                <Typography style={styles.avatarText}>{getInitials()}</Typography>
-              </LinearGradient>
-            </Pressable>
-          </Animated.View>
-
-          <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.headerText}>
-            {profileLoading ? (
-              <View style={styles.skeletonGroup}>
-                <SkeletonLoader width={160} height={22} borderRadius={8} />
-                <SkeletonLoader width={120} height={14} borderRadius={6} style={{ marginTop: 8, alignSelf: 'center' }} />
-              </View>
-            ) : (
-              <>
-                <Typography variant="h2" weight="bold" color="text-white" style={styles.displayName}>
-                  {displayName}
-                </Typography>
-                <Typography variant="caption" color="text-slate-400">
-                  Member since {memberSince}
-                </Typography>
-              </>
-            )}
-          </Animated.View>
-        </LinearGradient>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        
+        {/* User Identity Area */}
+        <Animated.View entering={FadeInDown.duration(600).springify()} style={styles.identitySection}>
+          <View style={styles.avatarWrap}>
+            <LinearGradient
+              colors={['#3B82F6', '#2563EB']}
+              style={styles.avatarGradient}
+            >
+              <Typography variant="h1" color="text-white" weight="bold">
+                {user?.email?.charAt(0).toUpperCase() || '?'}
+              </Typography>
+            </LinearGradient>
+          </View>
+          <Typography variant="h2" weight="bold" color="text-white" style={{ marginTop: 16 }}>
+            {user?.email || 'Anonymous User'}
+          </Typography>
+          <Typography variant="caption" color="text-blue-300" style={{ marginTop: 4 }}>
+            Member since {new Date(user?.created_at || Date.now()).getFullYear()}
+          </Typography>
+        </Animated.View>
 
         {/* Stats Row */}
-        <Animated.View entering={FadeInDown.delay(200).duration(600)} style={styles.statsRow}>
-          <StatCard emoji="📋" value={reportCount} label="Reports Filed" />
-          <View style={styles.statDivider} />
-          <StatCard emoji="🔖" value={savedIds.size} label="Saved Properties" />
-          <View style={styles.statDivider} />
-          <StatCard emoji="⭐" value={profile?.reputation_score ?? 0} label="Reputation" />
+        <Animated.View entering={FadeInUp.delay(100).duration(600).springify()} style={styles.statsContainer}>
+          <BlurView intensity={20} tint="light" style={styles.statsGlass}>
+            {profile?.role === 'owner' ? (
+              <>
+                <StatBox icon="home" value="4" label="Listings" color="#10B981" />
+                <View style={styles.statDivider} />
+                <StatBox icon="wallet" value="$4.5k" label="Monthly" color="#8B5CF6" />
+                <View style={styles.statDivider} />
+                <StatBox icon="star" value={profile?.reputation_score || 0} label="Trust" color="#FBBF24" />
+              </>
+            ) : (
+              <>
+                <StatBox icon="document-text" value={reportCount} label="Reports" color="#60A5FA" />
+                <View style={styles.statDivider} />
+                <StatBox icon="bookmark" value={savedIds.size} label="Saved" color="#A78BFA" />
+                <View style={styles.statDivider} />
+                <StatBox icon="star" value={profile?.reputation_score || 0} label="Trust" color="#FBBF24" />
+              </>
+            )}
+          </BlurView>
         </Animated.View>
 
-        {/* Account section */}
-        <Animated.View entering={FadeInDown.delay(300).duration(600)}>
-          <Typography variant="label" color="text-slate-400 mb-2 ml-1">ACCOUNT</Typography>
-          <Card padding="none" style={styles.menuCard}>
-            <MenuItem
-              icon="mail-outline"
-              label="Email"
-              subtitle={user?.email ?? '—'}
+        {/* Account Settings */}
+        <Animated.View entering={FadeInUp.delay(200).duration(600).springify()} style={styles.sectionGroup}>
+          <Typography variant="caption" weight="bold" color="text-slate-400" style={styles.sectionHeader}>
+            ACCOUNT
+          </Typography>
+          <View style={styles.menuCard}>
+            <MenuItem 
+              icon="mail" 
+              label="Email Address" 
+              subtitle={user?.email || ''} 
+              color="#3B82F6"
+              onPress={() => router.push('/settings/email')}
+              isLast={profile?.role === 'owner'}
             />
-            <View style={styles.menuDivider} />
-            <MenuItem
-              icon="shield-checkmark-outline"
-              label="Verification"
-              subtitle={user?.email_confirmed_at ? 'Email verified' : 'Unverified'}
-            />
-          </Card>
+            {profile?.role !== 'owner' && (
+              <MenuItem 
+                icon="shield-checkmark" 
+                label="Verification Status" 
+                subtitle="Verified Renter" 
+                color="#10B981"
+                isLast
+                onPress={() => router.push('/settings/verification')}
+              />
+            )}
+          </View>
         </Animated.View>
 
-        {/* Preferences section */}
-        <Animated.View entering={FadeInDown.delay(400).duration(600)} style={{ marginTop: 24 }}>
-          <Typography variant="label" color="text-slate-400 mb-2 ml-1">PREFERENCES</Typography>
-          <Card padding="none" style={styles.menuCard}>
-            <MenuItem
-              icon="notifications-outline"
-              label="Notifications"
-              subtitle="Manage alerts and updates"
-            />
-            <View style={styles.menuDivider} />
-            <MenuItem
-              icon="moon-outline"
-              label="Appearance"
-              subtitle="Follow system theme"
-            />
-            <View style={styles.menuDivider} />
-            <MenuItem
-              icon="lock-closed-outline"
-              label="Privacy &amp; Data"
-              subtitle="Manage your data"
-            />
-          </Card>
+        {/* Owner Settings (Conditionally Rendered) */}
+        {profile?.role === 'owner' && (
+          <Animated.View entering={FadeInUp.delay(250).duration(600).springify()} style={styles.sectionGroup}>
+            <Typography variant="caption" weight="bold" color="text-slate-400" style={styles.sectionHeader}>
+              LANDLORD TOOLS
+            </Typography>
+            <View style={styles.menuCard}>
+              <MenuItem icon="card" label="Payout Methods" subtitle="Bank Account linked" color="#10B981" onPress={() => handleComingSoon('Payout Methods')} />
+              <MenuItem icon="document-text" label="Lease Templates" subtitle="Manage agreements" color="#3B82F6" onPress={() => handleComingSoon('Lease Templates')} />
+              <MenuItem icon="people" label="Tenant Screening" subtitle="Background check APIs" color="#8B5CF6" isLast onPress={() => handleComingSoon('Tenant Screening')} />
+            </View>
+          </Animated.View>
+        )}
+
+        {/* Preferences Settings */}
+        <Animated.View entering={FadeInUp.delay(300).duration(600).springify()} style={styles.sectionGroup}>
+          <Typography variant="caption" weight="bold" color="text-slate-400" style={styles.sectionHeader}>
+            PREFERENCES
+          </Typography>
+          <View style={styles.menuCard}>
+            <MenuItem icon="notifications" label="Notifications" subtitle="Push, Email" color="#F59E0B" onPress={() => router.push('/settings/notifications')} />
+            <MenuItem icon="color-palette" label="Appearance" subtitle="Dark Theme" color="#8B5CF6" onPress={() => router.push('/settings/appearance')} />
+            <MenuItem icon="lock-closed" label="Privacy & Security" subtitle="Face ID Enabled" color="#6366F1" isLast onPress={() => router.push('/settings/privacy')} />
+          </View>
         </Animated.View>
 
-        {/* Danger zone */}
-        <Animated.View entering={FadeInDown.delay(500).duration(600)} style={{ marginTop: 24 }}>
-          <Card padding="none" style={styles.menuCard}>
+        {/* Actions */}
+        <Animated.View entering={FadeInUp.delay(400).duration(600).springify()} style={styles.sectionGroup}>
+          <View style={styles.menuCard}>
             <MenuItem
-              icon="log-out-outline"
+              icon="log-out"
               label="Sign Out"
-              onPress={handleSignOut}
               destructive
+              isLast
+              onPress={handleSignOut}
             />
-          </Card>
+          </View>
         </Animated.View>
 
-        {/* Footer */}
-        <Typography variant="caption" color="text-slate-300 dark:text-slate-600" style={styles.footer}>
-          HomeProof v1.0.0
-        </Typography>
+        {/* App Version Footer */}
+        <View style={styles.footer}>
+          <Typography variant="caption" color="text-slate-500">
+            HomeProof v1.0.0 (Build 42)
+          </Typography>
+        </View>
+
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#f8fafc' },
-  scroll: { flex: 1 },
-  content: { paddingBottom: 120 },
-  headerGradient: {
-    paddingTop: 48,
-    paddingBottom: 32,
-    alignItems: 'center',
-    gap: 16,
+  container: {
+    flex: 1,
+    backgroundColor: '#0F172A',
   },
-  avatarWrap: { alignItems: 'center' },
-  avatar: {
-    width: 88,
-    height: 88,
+  headerBackground: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 350,
+    borderBottomLeftRadius: 40,
+    borderBottomRightRadius: 40,
+    zIndex: -2,
+  },
+  glowOrb: {
+    position: 'absolute',
+    top: -50,
+    right: -50,
+    width: 250,
+    height: 250,
+    borderRadius: 125,
+    backgroundColor: '#3B82F6',
+    opacity: 0.15,
+    zIndex: -1,
+  },
+  scrollContent: {
+    paddingTop: Platform.OS === 'ios' ? 80 : 60,
+    paddingHorizontal: 20,
+    paddingBottom: 100,
+  },
+  identitySection: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  avatarWrap: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: '#1E3A8A',
+    padding: 4,
+    shadowColor: '#3B82F6',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+  },
+  avatarGradient: {
+    flex: 1,
     borderRadius: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#3B82F6',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
-    shadowRadius: 16,
-    elevation: 12,
   },
-  avatarText: { fontSize: 32, fontWeight: '700', color: '#FFFFFF' },
-  headerText: { alignItems: 'center', gap: 4 },
-  displayName: { letterSpacing: -0.3 },
-  skeletonGroup: { alignItems: 'center', gap: 8 },
-  statsRow: {
-    flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
-    marginHorizontal: 16,
-    marginTop: -20,
-    borderRadius: 20,
-    padding: 20,
+  statsContainer: {
+    marginBottom: 32,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.2,
+    shadowRadius: 15,
   },
-  statCard: { flex: 1, alignItems: 'center', gap: 4 },
-  statEmoji: { fontSize: 22 },
+  statsGlass: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-evenly',
+    paddingVertical: 20,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
+  },
+  statBox: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  statIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   statDivider: {
     width: 1,
-    backgroundColor: '#f1f5f9',
-    marginVertical: 4,
+    height: 50,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  sectionGroup: {
+    marginBottom: 24,
+  },
+  sectionHeader: {
+    marginLeft: 16,
+    marginBottom: 8,
+    letterSpacing: 1,
   },
   menuCard: {
-    marginHorizontal: 16,
-    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
     overflow: 'hidden',
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
+  },
+  menuItemWrapper: {
+    width: '100%',
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 12,
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
   },
-  menuItemPressed: { backgroundColor: '#f8fafc' },
+  menuItemPressed: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
   menuIconWrap: {
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: 'rgba(59,130,246,0.08)',
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 16,
   },
-  menuIconDestructive: { backgroundColor: 'rgba(239,68,68,0.08)' },
-  menuTextGroup: { flex: 1, gap: 2 },
-  menuDivider: { height: 1, backgroundColor: '#f1f5f9', marginLeft: 64 },
-  footer: { textAlign: 'center', marginTop: 32 },
+  menuTextGroup: {
+    flex: 1,
+    justifyContent: 'center',
+    gap: 2,
+  },
+  footer: {
+    alignItems: 'center',
+    marginTop: 20,
+  },
 });

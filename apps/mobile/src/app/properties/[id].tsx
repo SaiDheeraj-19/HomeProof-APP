@@ -10,12 +10,7 @@ export default function PropertyRoute() {
 
   return (
     <View className="flex-1 bg-white dark:bg-slate-950">
-      <Stack.Screen options={{ 
-        title: 'Property Hub',
-        headerBackTitle: 'Map',
-        headerStyle: { backgroundColor: '#f8fafc' },
-        headerShadowVisible: false,
-      }} />
+      <Stack.Screen options={{ headerShown: false }} />
       <PropertyDetails propertyId={id} />
     </View>
   );

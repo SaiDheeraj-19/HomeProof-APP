@@ -2,6 +2,7 @@ import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Platform, View, StyleSheet } from "react-native";
 import { BlurView } from "expo-blur";
+import { useUserStore } from "../../store/useUserStore";
 
 /** Glowing house icon shown on the Discover tab when focused */
 function GlowingHouseIcon({ focused, size }: { focused: boolean; size: number }) {
@@ -78,6 +79,9 @@ const styles = StyleSheet.create({
 });
 
 export default function TabLayout() {
+  const profile = useUserStore((s) => s.profile);
+  const isOwner = profile?.role === 'owner';
+
   return (
     <Tabs
       screenOptions={{
@@ -115,6 +119,7 @@ export default function TabLayout() {
         },
       }}
     >
+      {/* RENTER TABS */}
       <Tabs.Screen
         name="index"
         options={{
@@ -128,6 +133,7 @@ export default function TabLayout() {
         name="reports"
         options={{
           title: "Reports",
+          href: isOwner ? null : undefined,
           tabBarIcon: ({ color, size, focused }) => (
             <View style={{ alignItems: "center" }}>
               <Ionicons
@@ -143,6 +149,7 @@ export default function TabLayout() {
         name="saved"
         options={{
           title: "Saved",
+          href: isOwner ? null : undefined,
           tabBarIcon: ({ color, size, focused }) => (
             <View style={{ alignItems: "center" }}>
               <Ionicons
@@ -154,6 +161,57 @@ export default function TabLayout() {
           ),
         }}
       />
+
+      {/* OWNER TABS */}
+      <Tabs.Screen
+        name="owner-properties"
+        options={{
+          title: "Listings",
+          href: !isOwner ? null : undefined,
+          tabBarIcon: ({ color, size, focused }) => (
+            <View style={{ alignItems: "center" }}>
+              <Ionicons
+                name={focused ? "business" : "business-outline"}
+                size={size}
+                color={color}
+              />
+            </View>
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="messages"
+        options={{
+          title: "Messages",
+          tabBarIcon: ({ color, size, focused }) => (
+            <View style={{ alignItems: "center" }}>
+              <Ionicons
+                name={focused ? "chatbubbles" : "chatbubbles-outline"}
+                size={size}
+                color={color}
+              />
+            </View>
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="owner-leaderboard"
+        options={{
+          title: "City Rank",
+          href: !isOwner ? null : undefined,
+          tabBarIcon: ({ color, size, focused }) => (
+            <View style={{ alignItems: "center" }}>
+              <Ionicons
+                name={focused ? "trophy" : "trophy-outline"}
+                size={size}
+                color={color}
+              />
+            </View>
+          ),
+        }}
+      />
+
+      {/* SHARED PROFILE TAB */}
       <Tabs.Screen
         name="profile"
         options={{

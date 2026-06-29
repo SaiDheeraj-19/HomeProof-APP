@@ -2,7 +2,6 @@ import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
-  Image,
   Pressable,
   Dimensions,
   ScrollView,
@@ -20,52 +19,51 @@ import Animated, {
   interpolate,
   useAnimatedScrollHandler,
   Extrapolation,
+  withSpring,
 } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { haptics } from '../../shared/platform/haptics';
-import { BlurView } from 'expo-blur';
+import { Ionicons } from '@expo/vector-icons';
+import AnimatedBackground from './components/AnimatedBackground';
+import HeroVisual from './components/HeroVisual';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 const SLIDES = [
   {
-    emoji: '🛡️',
-    title: 'Trust Before\nYou Sign',
+    title: 'Know before\nyou move.',
     subtitle: 'Every property has a community-verified Trust Score based on real renter experiences, not marketing.',
-    accent: '#3B82F6',
   },
   {
-    emoji: '📸',
-    title: 'Report in\nSeconds',
-    subtitle: 'Snap a photo, record a voice note. Our AI handles the rest — categorizing, analyzing, and updating scores instantly.',
-    accent: '#2563EB',
+    title: 'Report in\nseconds.',
+    subtitle: 'Snap a photo or record a voice note. Our AI handles the rest — categorizing and analyzing instantly.',
   },
   {
-    emoji: '🗺️',
-    title: 'See Risk on\nthe Map',
+    title: 'Find homes\nyou can trust.',
     subtitle: 'Color-coded trust overlays reveal which neighborhoods are thriving and which have unresolved issues.',
-    accent: '#1D4ED8',
   },
 ];
 
-// ─── AnimatedDot ─────────────────────────────────────────────────────────────
-// Extracted into its own component so that useAnimatedStyle is called at the
-// top-level of a component, satisfying the Rules of Hooks.
-interface AnimatedDotProps {
-  index: number;
+// ─── Morphing Indicator ───────────────────────────────────────────────────────
+interface IndicatorProps {
   scrollX: SharedValue<number>;
-  pageWidth: number;
 }
 
-function AnimatedDot({ index, scrollX, pageWidth }: AnimatedDotProps) {
-  const animatedStyle = useAnimatedStyle(() => {
-    const inputRange = [(index - 1) * pageWidth, index * pageWidth, (index + 1) * pageWidth];
-    const dotWidth = interpolate(scrollX.value, inputRange, [8, 24, 8], Extrapolation.CLAMP);
-    const opacity = interpolate(scrollX.value, inputRange, [0.4, 1, 0.4], Extrapolation.CLAMP);
-    return { width: dotWidth, opacity };
-  });
-  return <Animated.View style={[styles.dot, animatedStyle]} />;
+function ProgressIndicator({ scrollX }: IndicatorProps) {
+  return (
+    <View style={styles.indicatorContainer}>
+      {SLIDES.map((_, index) => {
+        const animatedStyle = useAnimatedStyle(() => {
+          const inputRange = [(index - 1) * width, index * width, (index + 1) * width];
+          const dotWidth = interpolate(scrollX.value, inputRange, [8, 32, 8], Extrapolation.CLAMP);
+          const opacity = interpolate(scrollX.value, inputRange, [0.3, 1, 0.3], Extrapolation.CLAMP);
+          return { width: dotWidth, opacity };
+        });
+        return <Animated.View key={index} style={[styles.dot, animatedStyle]} />;
+      })}
+    </View>
+  );
 }
 
 // ─── OnboardingScreen ─────────────────────────────────────────────────────────
@@ -75,14 +73,29 @@ export default function OnboardingScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const [activeIndex, setActiveIndex] = useState(0);
 
+  // Button Physics
+  const buttonScale = useSharedValue(1);
+  const arrowTranslate = useSharedValue(0);
+
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (e) => {
       scrollX.value = e.contentOffset.x;
     },
   });
 
-  const handleNext = () => {
+  const handlePressIn = () => {
     haptics.light();
+    buttonScale.value = withSpring(0.96, { damping: 15, stiffness: 200 });
+    arrowTranslate.value = withSpring(6, { damping: 10, stiffness: 150 });
+  };
+
+  const handlePressOut = () => {
+    buttonScale.value = withSpring(1, { damping: 15, stiffness: 200 });
+    arrowTranslate.value = withSpring(0, { damping: 10, stiffness: 150 });
+  };
+
+  const handleNext = () => {
+    haptics.medium();
     if (activeIndex < SLIDES.length - 1) {
       const nextIndex = activeIndex + 1;
       scrollRef.current?.scrollTo({ x: nextIndex * width, animated: true });
@@ -96,39 +109,30 @@ export default function OnboardingScreen() {
     router.push('/(auth)/login');
   };
 
+  const buttonAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: buttonScale.value }],
+  }));
+
+  const arrowAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: arrowTranslate.value }],
+  }));
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
+      <AnimatedBackground />
 
-      {/* Deep gradient background matching icon */}
-      <LinearGradient
-        colors={['#0F172A', '#1E3A5F', '#1D4ED8']}
-        locations={[0, 0.5, 1]}
-        style={StyleSheet.absoluteFill}
-      />
-
-      {/* Subtle glow orbs */}
-      <View style={[styles.glowOrb, { top: -80, left: -80, backgroundColor: '#3B82F6' }]} />
-      <View style={[styles.glowOrb, { bottom: 100, right: -80, backgroundColor: '#1D4ED8' }]} />
-
-      {/* Skip button */}
       <Animated.View entering={FadeIn.delay(300).duration(600)} style={styles.skipContainer}>
-        <Pressable onPress={handleSkip} style={styles.skipButton}>
+        <Pressable onPress={handleSkip} hitSlop={10}>
           <Text style={styles.skipText}>Skip</Text>
         </Pressable>
       </Animated.View>
 
-      {/* Logo */}
-      <Animated.View entering={FadeInDown.delay(100).duration(800).springify()} style={styles.logoContainer}>
-        <Image
-          source={require('../../../assets/images/icon.png')}
-          style={styles.logo}
-          resizeMode="contain"
-        />
+      <Animated.View entering={FadeInDown.delay(100).duration(1000).springify()} style={styles.headerContainer}>
         <Text style={styles.logoText}>HomeProof</Text>
+        <Text style={styles.tagline}>Proof Before You Move</Text>
       </Animated.View>
 
-      {/* Slides */}
       <Animated.ScrollView
         ref={scrollRef}
         horizontal
@@ -143,55 +147,67 @@ export default function OnboardingScreen() {
       >
         {SLIDES.map((slide, index) => (
           <View key={index} style={styles.slide}>
-            <Animated.View entering={FadeIn.delay(500 + index * 100).duration(800)} style={styles.emojiContainer}>
-              <BlurView intensity={20} tint="light" style={styles.emojiBlur}>
-                <Text style={styles.emoji}>{slide.emoji}</Text>
-              </BlurView>
+            <Animated.View entering={FadeIn.delay(400 + index * 100).duration(1000)} style={styles.heroContainer}>
+              <HeroVisual index={index} />
             </Animated.View>
 
-            <Animated.Text
-              entering={FadeInUp.delay(600 + index * 100).duration(800)}
-              style={styles.slideTitle}
-            >
-              {slide.title}
-            </Animated.Text>
+            <View style={styles.textContainer}>
+              <Animated.Text
+                entering={FadeInUp.delay(500 + index * 100).duration(800).springify()}
+                style={styles.slideTitle}
+              >
+                {slide.title}
+              </Animated.Text>
 
-            <Animated.Text
-              entering={FadeInUp.delay(700 + index * 100).duration(800)}
-              style={styles.slideSubtitle}
-            >
-              {slide.subtitle}
-            </Animated.Text>
+              <Animated.Text
+                entering={FadeInUp.delay(600 + index * 100).duration(800).springify()}
+                style={styles.slideSubtitle}
+              >
+                {slide.subtitle}
+              </Animated.Text>
+            </View>
           </View>
         ))}
       </Animated.ScrollView>
 
-      {/* Bottom CTA area */}
-      <Animated.View entering={FadeInUp.delay(800).duration(600)} style={styles.bottomContainer}>
+      <Animated.View entering={FadeInUp.delay(900).duration(800).springify()} style={styles.bottomContainer}>
+        <ProgressIndicator scrollX={scrollX} />
 
-        {/* Pagination Dots */}
-        <View style={styles.dotsContainer}>
-          {SLIDES.map((_, index) => (
-            <AnimatedDot key={index} index={index} scrollX={scrollX} pageWidth={width} />
-          ))}
-        </View>
-
-        {/* Primary CTA Button */}
-        <Pressable
-          onPress={handleNext}
-          style={({ pressed }) => [styles.ctaButton, pressed && { opacity: 0.9, transform: [{ scale: 0.97 }] }]}
-        >
-          <LinearGradient
-            colors={['#3B82F6', '#2563EB']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.ctaGradient}
+        <Animated.View style={[styles.ctaWrapper, buttonAnimatedStyle]}>
+          <Pressable
+            onPressIn={handlePressIn}
+            onPressOut={handlePressOut}
+            onPress={handleNext}
+            style={styles.ctaButton}
           >
-            <Text style={styles.ctaText}>
-              {activeIndex === SLIDES.length - 1 ? 'Get Started →' : 'Continue →'}
-            </Text>
-          </LinearGradient>
-        </Pressable>
+            <LinearGradient
+              colors={['rgba(59, 130, 246, 0.9)', 'rgba(30, 58, 138, 0.9)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.ctaGlass}
+            >
+              <View style={styles.ctaContent}>
+                <View style={styles.iconCircleWrapper}>
+                  <View style={styles.arrowGlow} />
+                  <View style={styles.iconCircle}>
+                    <Animated.View style={arrowAnimatedStyle}>
+                      <Ionicons name="arrow-forward" size={24} color="#FFFFFF" />
+                    </Animated.View>
+                  </View>
+                </View>
+                
+                <View style={styles.ctaTextContainer}>
+                  <Text style={styles.ctaText}>
+                    {activeIndex === SLIDES.length - 1 ? 'Get Started' : 'Continue'}
+                  </Text>
+                  <Text style={styles.ctaSubtitle}>
+                    Let's get started
+                  </Text>
+                </View>
+              </View>
+            </LinearGradient>
+          </Pressable>
+        </Animated.View>
 
         <Text style={styles.legalText}>
           By continuing, you agree to our Terms & Privacy Policy.
@@ -204,136 +220,169 @@ export default function OnboardingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F172A',
-  },
-  glowOrb: {
-    position: 'absolute',
-    width: 300,
-    height: 300,
-    borderRadius: 150,
-    opacity: 0.12,
+    backgroundColor: '#070B14', // Fallback for animated bg
   },
   skipContainer: {
     position: 'absolute',
     top: Platform.OS === 'ios' ? 60 : 40,
-    right: 24,
+    right: 32,
     zIndex: 10,
   },
-  skipButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-  },
   skipText: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 14,
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 15,
     fontWeight: '500',
+    letterSpacing: 0.2,
   },
-  logoContainer: {
+  headerContainer: {
     alignItems: 'center',
-    marginTop: Platform.OS === 'ios' ? 110 : 90,
-    marginBottom: 8,
-  },
-  logo: {
-    width: 72,
-    height: 72,
-    borderRadius: 18,
-    shadowColor: '#3B82F6',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.6,
-    shadowRadius: 20,
+    marginTop: Platform.OS === 'ios' ? 70 : 50,
+    marginBottom: 0,
   },
   logoText: {
     color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    marginTop: 10,
-    opacity: 0.9,
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  tagline: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 13,
+    fontWeight: '500',
+    letterSpacing: 1,
+    marginTop: 4,
+    textTransform: 'uppercase',
   },
   scrollView: {
     flex: 1,
   },
   slide: {
     width,
+    justifyContent: 'center',
+    alignItems: 'center',
     paddingHorizontal: 32,
+    paddingTop: height * 0.05,
+    paddingBottom: height * 0.1,
+  },
+  heroContainer: {
+    height: 260,
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 20,
+    marginBottom: 40,
   },
-  emojiContainer: {
-    marginBottom: 8,
-  },
-  emojiBlur: {
-    width: 96,
-    height: 96,
-    borderRadius: 28,
+  textContainer: {
     alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
-  emoji: {
-    fontSize: 48,
+    gap: 16,
   },
   slideTitle: {
-    fontSize: 40,
+    fontSize: 42,
     fontWeight: '800',
     color: '#FFFFFF',
     textAlign: 'center',
     lineHeight: 48,
-    letterSpacing: -0.5,
+    letterSpacing: -1,
   },
   slideSubtitle: {
-    fontSize: 17,
-    color: 'rgba(255,255,255,0.65)',
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.6)',
     textAlign: 'center',
-    lineHeight: 26,
-    maxWidth: 320,
+    lineHeight: 24,
+    maxWidth: 300,
+    fontWeight: '400',
   },
   bottomContainer: {
-    paddingHorizontal: 24,
-    paddingBottom: Platform.OS === 'ios' ? 48 : 32,
-    gap: 20,
+    alignSelf: 'stretch',
+    paddingHorizontal: 32,
+    paddingBottom: Platform.OS === 'ios' ? 56 : 40,
+    gap: 32,
     alignItems: 'center',
   },
-  dotsContainer: {
+  indicatorContainer: {
     flexDirection: 'row',
-    gap: 6,
+    gap: 8,
     alignItems: 'center',
+    height: 12,
   },
   dot: {
-    height: 8,
-    borderRadius: 4,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: '#FFFFFF',
+  },
+  ctaWrapper: {
+    width: '100%',
+    alignSelf: 'stretch',
   },
   ctaButton: {
     width: '100%',
-    borderRadius: 18,
-    overflow: 'hidden',
+    alignSelf: 'stretch',
+    borderRadius: 100,
     shadowColor: '#3B82F6',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.25,
+    shadowRadius: 30,
+    elevation: 8,
+  },
+  ctaGlass: {
+    width: '100%',
+    alignSelf: 'stretch',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 100, 
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  ctaContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: 16,
+  },
+  iconCircleWrapper: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  arrowGlow: {
+    position: 'absolute',
+    width: 30,
+    height: 30,
+    backgroundColor: '#60A5FA',
+    borderRadius: 15,
+    shadowColor: '#60A5FA',
     shadowRadius: 20,
+    shadowOpacity: 1,
+    shadowOffset: { width: -15, height: 0 },
     elevation: 10,
   },
-  ctaGradient: {
-    paddingVertical: 18,
+  iconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#0A1128',
+    borderWidth: 1.5,
+    borderColor: 'rgba(96, 165, 250, 0.8)',
     alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  ctaTextContainer: {
+    flexDirection: 'column',
     justifyContent: 'center',
   },
   ctaText: {
     color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 20,
+    fontWeight: '800',
     letterSpacing: 0.3,
   },
+  ctaSubtitle: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
+    fontWeight: '400',
+    marginTop: -2,
+  },
   legalText: {
-    color: 'rgba(255,255,255,0.3)',
+    color: 'rgba(255,255,255,0.25)',
     fontSize: 12,
     textAlign: 'center',
   },

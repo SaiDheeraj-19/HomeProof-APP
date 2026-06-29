@@ -60,8 +60,8 @@ function RootLayoutNav() {
     const inAuthGroup = segments[0] === '(auth)';
 
     if (!session && !inAuthGroup) {
-      // Redirect to the onboarding page.
-      router.replace('/(auth)/onboarding');
+      // Redirect to the login page.
+      router.replace('/(auth)/login');
     } else if (session && inAuthGroup) {
       // Redirect away from the login page.
       router.replace('/(tabs)');
@@ -80,6 +80,8 @@ function RootLayoutNav() {
     <Stack>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+      <Stack.Screen name="settings" options={{ headerShown: false }} />
+      <Stack.Screen name="chat" options={{ headerShown: false }} />
     </Stack>
   );
 }
